@@ -1,0 +1,218 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'SaaS API: game'
+
+Parameters:
+  AppName:
+    Type: String
+    Default: 'game'
+  EnvKey:
+    Type: String
+    AllowedValues:
+      - 'prd'
+      - 'stg'
+      - 'dev'
+    Default: 'dev'
+
+Resources:
+  UserCategoriesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${AppName}-${EnvKey}-UserCategories
+      AttributeDefinitions:
+        - AttributeName: userId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: userId
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+  UserItemsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${AppName}-${EnvKey}-UserItems
+      AttributeDefinitions:
+        - AttributeName: userId
+          AttributeType: S
+        - AttributeName: itemKey
+          AttributeType: S
+      KeySchema:
+        - AttributeName: userId
+          KeyType: HASH
+        - AttributeName: itemKey
+          KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+
+  CognitoUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub ${AppName}-${EnvKey}-UserPool
+      AutoVerifiedAttributes:
+        - email
+      Schema:
+        - Name: email
+          Required: true
+          Mutable: false
+      UsernameAttributes:
+        - email
+      EmailVerificationMessage: 'Your verification code is {####}.'
+      EmailVerificationSubject: 'Your verification code'
+
+  GetCategoriesFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${AppName}-${EnvKey}-GetCategoriesFunction
+      Runtime: nodejs14.x
+      Handler: index.handler
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => {
+            // Your Lambda function code here
+          };
+      Environment:
+        Variables:
+          USER_CATEGORIES_TABLE: !Ref UserCategoriesTable
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 10
+
+  GetItemsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${AppName}-${EnvKey}-GetItemsFunction
+      Runtime: nodejs14.x
+      Handler: index.handler
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => {
+            // Your Lambda function code here
+          };
+      Environment:
+        Variables:
+          USER_ITEMS_TABLE: !Ref UserItemsTable
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 10
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AppName}-${EnvKey}-LambdaExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub ${AppName}-${EnvKey}-DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !GetAtt UserCategoriesTable.Arn
+                  - !GetAtt UserItemsTable.Arn
+
+  GameApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub ${AppName}-${EnvKey}-Api
+
+  CategoriesResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt GameApi.RootResourceId
+      PathPart: categories
+      RestApiId: !Ref GameApi
+
+  ItemsResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt GameApi.RootResourceId
+      PathPart: items
+      RestApiId: !Ref GameApi
+
+  GetCategoriesMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      HttpMethod: GET
+      AuthorizationType: NONE
+      ApiKeyRequired: true
+      RestApiId: !Ref GameApi
+      ResourceId: !Ref CategoriesResource
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetCategoriesFunction.Arn}/invocations
+
+  GetItemsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      HttpMethod: GET
+      AuthorizationType: NONE
+      ApiKeyRequired: true
+      RestApiId: !Ref GameApi
+      ResourceId: !Ref ItemsResource
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetItemsFunction.Arn}/invocations
+
+  ApiGatewayLambdaCategoriesInvoke:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref GetCategoriesFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${GameApi}/*/GET/categories
+
+  ApiGatewayLambdaItemsInvoke:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref GetItemsFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${GameApi}/*/GET/items
+
+  GameApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - GetCategoriesMethod
+      - GetItemsMethod
+    Properties:
+      RestApiId: !Ref GameApi
+      StageName: !Ref EnvKey
+
+  GameApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    Properties:
+      Name: !Sub ${AppName}-${EnvKey}-ApiKey
+      Enabled: true
+      GenerateDistinctId: true
+
+  GameUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    DependsOn: GameApiDeployment
+    Properties:
+      ApiStages:
+        - ApiId: !Ref GameApi
+          Stage: !Ref EnvKey
+      Quota:
+        Limit: 5000
+        Period: MONTH
+      Throttle:
+        BurstLimit: 200
+        RateLimit: 100
+
+  GameUsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    DependsOn: GameUsagePlan
+    Properties:
+      KeyId: !Ref GameApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref GameUsagePlan
