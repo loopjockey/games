@@ -71,9 +71,9 @@ Resources:
       FunctionName: !Sub ${AppName}-${EnvKey}-GetCategoriesFunction
       Runtime: nodejs14.x
       Handler: getCategories.handler
-      CodeUri:
-        Bucket: !Ref LambdaCodeBucket
-        Key: !Ref LambdaCodeS3Key
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref LambdaCodeS3Key
       Environment:
         Variables:
           USER_CATEGORIES_TABLE: !Ref UserCategoriesTable
@@ -86,9 +86,9 @@ Resources:
       FunctionName: !Sub ${AppName}-${EnvKey}-GetItemsFunction
       Runtime: nodejs14.x
       Handler: getItems.handler
-      CodeUri:
-        Bucket: !Ref LambdaCodeBucket
-        Key: !Ref LambdaCodeS3Key
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref LambdaCodeS3Key
       Environment:
         Variables:
           USER_ITEMS_TABLE: !Ref UserItemsTable
