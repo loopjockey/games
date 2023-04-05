@@ -109,35 +109,48 @@ Resources:
             Action:
               - sts:AssumeRole
       Policies:
-        - PolicyName: !Sub ${AppName}-${EnvKey}-DynamoDBAccess
+        - PolicyName: !Sub ${AppName}-${EnvKey}-LambdaPolicy
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
                 Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+              - Effect: Allow
+                Action:
                   - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
                   - dynamodb:Query
-                  - dynamodb:Scan
                 Resource:
                   - !GetAtt UserCategoriesTable.Arn
                   - !GetAtt UserItemsTable.Arn
-
   GameApi:
     Type: AWS::ApiGateway::RestApi
     Properties:
       Name: !Sub ${AppName}-${EnvKey}-Api
 
-  CategoriesResource:
+  UsersResource:
     Type: AWS::ApiGateway::Resource
     Properties:
       ParentId: !GetAtt GameApi.RootResourceId
+      PathPart: '{userId}'
+      RestApiId: !Ref GameApi
+
+  CategoriesResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !Ref UsersResource
       PathPart: categories
       RestApiId: !Ref GameApi
 
   ItemsResource:
     Type: AWS::ApiGateway::Resource
     Properties:
-      ParentId: !GetAtt GameApi.RootResourceId
+      ParentId: !Ref UsersResource
       PathPart: items
       RestApiId: !Ref GameApi
 
@@ -173,7 +186,7 @@ Resources:
       FunctionName: !Ref GetCategoriesFunction
       Action: lambda:InvokeFunction
       Principal: apigateway.amazonaws.com
-      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${GameApi}/*/GET/categories
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${GameApi}/*/GET/{userId}/categories
 
   ApiGatewayLambdaItemsInvoke:
     Type: AWS::Lambda::Permission
@@ -181,7 +194,7 @@ Resources:
       FunctionName: !Ref GetItemsFunction
       Action: lambda:InvokeFunction
       Principal: apigateway.amazonaws.com
-      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${GameApi}/*/GET/items
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${GameApi}/*/GET/{userId}/items
 
   GameApiDeployment:
     Type: AWS::ApiGateway::Deployment
